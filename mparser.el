@@ -68,14 +68,17 @@
          (date (when date1
                  (format-time-string "%a, %b %d, %Y at %H:%M:%S %Z"
                                      (parse-iso8601-time-string date1))))
-         (byline (format " <p>By %s on %s</p><hr>" author date))
+         (byline (concat (when author (format " <p>By %s</p>" author))
+                         (when date (format " <p>On %s</p>" date))
+                         "<hr>"))
+         (image (format "<img src=\"%s\">\n" (alist-get 'lead_image_url json)))
          (err (alist-get 'error json))
          (content (alist-get 'content json)))
     (if err
         (user-error (format "%s" err))
       (unless (string= content "<div></div>")
         (with-temp-buffer
-          (insert title byline content)
+          (insert title (when image image) byline content)
           (condition-case nil
               (decode-coding-region (point-min) (point-max) 'utf-8)
             (coding-system-error nil))
@@ -100,7 +103,11 @@ the like."
                           nil (current-buffer))
         (dolist (elem '(:source :url :title :next :previous :up))
           (plist-put eww-data elem (plist-get old-data elem)))
-        (eww-update-header-line-format))
+        ;; update for this commit
+        ;; 171de3eee459ed64388a8ced7d07fa031ea025a6 in emacs29
+        (if (fboundp #'eww--after-page-change)
+            (eww--after-page-change)
+          (eww-update-header-line-format)))
     (funcall #'eww-readable)))
 
 ;;; * Elfeed
@@ -128,17 +135,24 @@ Include ARGS for elfeed entry and excerpt options."
          (byline (concat (when author (format " <p>By %s</p>" author))
                          (when date (format " <p>On %s</p>" date))
                          "<hr>"))
+         (image (format "<img src=\"%s\">\n" (alist-get 'lead_image_url json)))
          (entry (car args))
          (keepExcerpt (cadr args))
-         article)
+         article header)
     (if err
         (user-error (format "%s" err))
-      (setq article (format "%s\n%s" byline content))
+      (if image
+          (setq header (concat image byline))
+        (setq header byline))
+      (setq article (format "%s\n%s" header content))
       (when keepExcerpt
         (setq article (concat (elfeed-deref (elfeed-entry-content entry)) "<br><br>---<br>" article)))
       (when (string= content "<div></div>")
         (setq article nil))
       article)))
+
+;; need to have to avoid `setf' errors in function below
+(eval-when-compile (require 'elfeed))
 
 (defun mparser-elfeed--readability-content (entry &optional keepExcerpt)
   "Replace entry content with readability article.
